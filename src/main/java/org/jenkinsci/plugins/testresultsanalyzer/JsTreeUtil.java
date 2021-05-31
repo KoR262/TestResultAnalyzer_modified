@@ -24,7 +24,7 @@ public class JsTreeUtil {
             buildJson.add(buildNumber.toString());
         }
         tree.put("builds", buildJson);
-
+        tree.put("lastBuild", builds.get(0));
         JSONArray results = new JSONArray();
         for (Map.Entry<String, ? extends Info> entry : resultInfo.getPackageResults().entrySet()) {
             results.add(createJson(builds, entry.getValue(), hideConfigMethods));

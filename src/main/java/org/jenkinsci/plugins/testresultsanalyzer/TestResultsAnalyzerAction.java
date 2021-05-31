@@ -6,27 +6,25 @@ import hudson.tasks.test.TabulatedResult;
 import hudson.tasks.test.AbstractTestResultAction;
 import hudson.tasks.test.TestResult;
 import hudson.util.RunList;
-
 import java.io.*;
 import java.math.RoundingMode;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.text.DecimalFormat;
 import java.util.*;
 import java.util.logging.Logger;
-
-import jdk.jfr.events.FileWriteEvent;
 import jenkins.model.Jenkins;
-import jenkins.model.RunAction2;
-import jnr.x86asm.ERROR_CODE;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
-
-import org.codehaus.groovy.tools.shell.IO;
+import org.acegisecurity.userdetails.User;
+import org.json.simple.parser.JSONParser;
 import org.jenkinsci.plugins.testresultsanalyzer.config.UserConfig;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.ResultInfo;
 import org.jenkinsci.plugins.testresultsanalyzer.result.data.ResultData;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.ClassInfo;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.PackageInfo;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.TestCaseInfo;
+import org.json.simple.parser.ParseException;
 import org.kohsuke.stapler.bind.JavaScriptMethod;
 
 public class TestResultsAnalyzerAction extends Actionable implements Action {
@@ -92,6 +90,8 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	public Job getProject() {
 		return this.project;
 	}
+
+
 
 	@JavaScriptMethod
 	public JSONArray getNoOfBuilds(String noOfbuildsNeeded, UserConfig userConfig) {
@@ -162,6 +162,7 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	}
 
 	private int getNoOfBuildRequired(String noOfbuildsNeeded) {
+
 		int noOfBuilds;
 		try {
 			noOfBuilds = Integer.parseInt(noOfbuildsNeeded);
@@ -185,8 +186,14 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	public void getJsonLoadData() {
 		LOG.info("Get data for report [isUpdated = "+String.valueOf(isUpdated())+"]");
-		if (!isUpdated()) {
-			return;
+		try {
+			if (!CacheIsEmpty()) {
+			if (!isUpdated() || !isAddedNewBuildAfterRun()) {
+				return;
+			}
+			}
+		} catch (IOException | ParseException e) {
+			e.printStackTrace();
 		}
 		resultInfo = new ResultInfo();
 		builds = new ArrayList<Integer>();
@@ -263,8 +270,21 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		}
 	}
 
-    @JavaScriptMethod
-    public JSONObject getTreeResult(UserConfig userConfig) throws IOException {
+	private JSONObject UpdateCache(UserConfig userConfig) throws IOException {
+		JSONObject builds = generateJsonBuilds(userConfig);
+		saveBuildsInCache(builds);
+		return builds;
+	}
+
+	private boolean isAddedNewBuildAfterRun() throws IOException,  org.json.simple.parser.ParseException {
+		FileReader fileReader = new FileReader(createCacheFile());
+		JSONParser jsonParser = new JSONParser();
+		org.json.simple.JSONObject jsonObject = (org.json.simple.JSONObject) jsonParser.parse(fileReader);
+		long id = (long)jsonObject.get("lastBuild");
+		return project.getLastBuild().getNumber() != id;
+	}
+
+	private JSONObject generateJsonBuilds(UserConfig userConfig) {
 		if (resultInfo == null) {
 			return new JSONObject();
 		}
@@ -272,11 +292,38 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		LOG.warning("No of build needed: " + userConfig.getNoOfBuildsNeeded());
 		LOG.warning("No of build fetched: " + String.valueOf(noOfBuilds));
 		LOG.warning("Build filter: " + userConfig.getBuildFilter());
-        List<Integer> buildList = getBuildList(noOfBuilds, userConfig.getBuildFilter());
-        JsTreeUtil jsTreeUtils = new JsTreeUtil();
-        JSONObject builds = jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
-		saveBuildsInCache(builds);
-		return builds;
+		List<Integer> buildList = getBuildList(noOfBuilds, userConfig.getBuildFilter());
+		JsTreeUtil jsTreeUtils = new JsTreeUtil();
+		return jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
+	}
+
+	private boolean CacheIsEmpty() {
+		File file = new File(String.format("work/jobs/%s/cache.json", project.getName()));
+		return file.length() == 0;
+	}
+
+    @JavaScriptMethod
+    public JSONObject getTreeResult(UserConfig userConfig) throws IOException, ParseException {
+		long startTime = System.currentTimeMillis();
+		if (CacheIsEmpty()) {
+			JSONObject builds = UpdateCache(userConfig);
+			long endTime = System.currentTimeMillis();
+			LOG.info("Total execution time: " + (endTime-startTime) + "ms");
+			return builds;
+		}
+		if (isAddedNewBuildAfterRun()) {
+			LOG.info("New build was created and cache was updated");
+			JSONObject builds = UpdateCache(userConfig);
+			long endTime = System.currentTimeMillis();
+			LOG.info("Total execution time: " + (endTime-startTime) + "ms");
+			return builds;
+		} else {
+			LOG.info("Loading builds from cache...");
+			String content = new String(Files.readAllBytes(Paths.get(String.format("work/jobs/%s/cache.json", project.getName()))));
+			long endTime = System.currentTimeMillis();
+			LOG.info("Total execution time: " + (endTime-startTime) + "ms");
+			return JSONObject.fromObject(content);
+		}
     }
 
 
