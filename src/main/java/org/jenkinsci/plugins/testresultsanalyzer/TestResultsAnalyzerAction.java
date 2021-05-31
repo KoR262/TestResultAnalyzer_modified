@@ -1,29 +1,26 @@
 package org.jenkinsci.plugins.testresultsanalyzer;
 
-import hudson.model.Action;
-import hudson.model.Item;
-import hudson.model.Job;
-import hudson.model.Actionable;
-import hudson.model.Run;
+import hudson.model.*;
 import hudson.tasks.test.AggregatedTestResultAction;
 import hudson.tasks.test.TabulatedResult;
 import hudson.tasks.test.AbstractTestResultAction;
 import hudson.tasks.test.TestResult;
 import hudson.util.RunList;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.math.RoundingMode;
 import java.text.DecimalFormat;
 import java.util.*;
 import java.util.logging.Logger;
 
+import jdk.jfr.events.FileWriteEvent;
 import jenkins.model.Jenkins;
+import jenkins.model.RunAction2;
+import jnr.x86asm.ERROR_CODE;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
+import org.codehaus.groovy.tools.shell.IO;
 import org.jenkinsci.plugins.testresultsanalyzer.config.UserConfig;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.ResultInfo;
 import org.jenkinsci.plugins.testresultsanalyzer.result.data.ResultData;
@@ -161,7 +158,6 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 				buildList.add(builds.get(i));
 			}
 		}
-
 		return buildList;
 	}
 
@@ -181,7 +177,6 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		if (lastBuild == null) {
 			return false;
 		}
-
 		int latestBuildNumber = lastBuild.getNumber();
 		LOG.info(" " + lastBuild.getNumber());
 		return !(builds.contains(latestBuildNumber));
@@ -193,10 +188,8 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		if (!isUpdated()) {
 			return;
 		}
-
 		resultInfo = new ResultInfo();
 		builds = new ArrayList<Integer>();
-
 		RunList<Run> runs = null;
 		if (getNoOfRunsToFetch() > 0) {
 		    runs = project.getBuilds().limit(getNoOfRunsToFetch());
@@ -209,10 +202,8 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 			if(run.isBuilding()) {
 				continue;
 			}
-
 			int buildNumber = run.getNumber();
 			builds.add(buildNumber);
-
 			List<AbstractTestResultAction> testActions = run.getActions(AbstractTestResultAction.class);
 			for (AbstractTestResultAction testAction : testActions) {
 				if (AggregatedTestResultAction.class.isInstance(testAction)) {
@@ -237,8 +228,6 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		if (run == null || result == null) {
 			return;
 		}
-
-
 		try {
 			TabulatedResult testResult = (TabulatedResult) result;
 			Collection<? extends TestResult> packageResults = testResult.getChildren();
@@ -252,46 +241,44 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		}
 	}
 
-	public void saveBuildInf(JSONObject buildInf){
-		try {
-			File f = new File(String.format("work/jobs/%s/Cache.json", project.getName()));
-			if (f.createNewFile()){
-				try(BufferedWriter writter = new BufferedWriter(new FileWriter(String.format("work/jobs/%s/Cache.json", project.getName())))){
-					writter.write(String.valueOf(buildInf));
-					System.out.println("Information added");
-				}
-				catch (Exception e){
-					System.err.println(e);
-				}
-				System.out.println("File created");
-			}
-			else{
-				System.out.println("File not created");
+	private File createCacheFile() throws IOException {
+		File file = new File(String.format("work/jobs/%s/cache.json", project.getName()));
+		if (!file.exists()) {
+			boolean isCreated = file.createNewFile();
+			if (isCreated) {
+				LOG.info("Cache file was created successfully");
+			} else {
+				LOG.info("Cache file has already been created");
 			}
 		}
-		catch (Exception e){
-			System.err.println(e);
+		return file;
+	}
+
+	private void saveBuildsInCache(JSONObject builds) throws IOException {
+		FileWriter fileWriter = new FileWriter(createCacheFile());
+		try(BufferedWriter bufferedWriter = new BufferedWriter(fileWriter)) {
+			bufferedWriter.write(String.valueOf(builds));
+		} catch (IOException e) {
+			e.printStackTrace();
 		}
 	}
 
     @JavaScriptMethod
-    public JSONObject getTreeResult(UserConfig userConfig) {
+    public JSONObject getTreeResult(UserConfig userConfig) throws IOException {
 		if (resultInfo == null) {
 			return new JSONObject();
 		}
-
 		int noOfBuilds = getNoOfBuildRequired(userConfig.getNoOfBuildsNeeded());
 		LOG.warning("No of build needed: " + userConfig.getNoOfBuildsNeeded());
 		LOG.warning("No of build fetched: " + String.valueOf(noOfBuilds));
-		LOG.warning("Build filter: "+userConfig.getBuildFilter());
+		LOG.warning("Build filter: " + userConfig.getBuildFilter());
         List<Integer> buildList = getBuildList(noOfBuilds, userConfig.getBuildFilter());
-
         JsTreeUtil jsTreeUtils = new JsTreeUtil();
-		LOG.info("Hello       " + jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods()));
-		LOG.info(" " + project.getName());
-		saveBuildInf(jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods()));
-		return jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
+        JSONObject builds = jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
+		saveBuildsInCache(builds);
+		return builds;
     }
+
 
 	@JavaScriptMethod
     public String getExportCSV(String timeBased, String noOfBuildsNeeded, UserConfig userConfig) {
@@ -299,7 +286,7 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
         Map<String, PackageInfo> packageResults = resultInfo.getPackageResults();
 		int noOfBuilds = getNoOfBuildRequired(noOfBuildsNeeded);
 		List<Integer> buildList = getBuildList(noOfBuilds, userConfig.getBuildFilter());
-
+		LOG.info("GetExport");
 		StringBuffer builder = new StringBuffer("");
         for (int i = 0; i < buildList.size(); i++) {
             builder.append(",\"");
@@ -431,17 +418,5 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 
     public String getPassedColor() {
         return TestResultsAnalyzerExtension.DESCRIPTOR.getPassedColor();
-    }
-
-    public String getFailedColor() {
-        return TestResultsAnalyzerExtension.DESCRIPTOR.getFailedColor();
-    }
-
-    public String getSkippedColor() {
-        return TestResultsAnalyzerExtension.DESCRIPTOR.getSkippedColor();
-    }
-
-    public String getNaColor() {
-        return TestResultsAnalyzerExtension.DESCRIPTOR.getNaColor();
     }
 }

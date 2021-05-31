@@ -60,7 +60,6 @@ public class JsTreeUtil {
         JSONArray children = new JSONArray();
         for (Map.Entry<String, ? extends Info> entry : childrenInfo.entrySet()) {
             if (!hideConfigMethods || !entry.getValue().isConfig()) {
-
                 children.add(createJson(builds, entry.getValue(), hideConfigMethods));
             }
         }
@@ -86,8 +85,6 @@ public class JsTreeUtil {
             json.put("statusString", result.getStatusString());
             json.put("url", result.getUrl());
         }
-
-
         return json;
     }
 }
