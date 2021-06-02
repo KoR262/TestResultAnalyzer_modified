@@ -57,26 +57,14 @@ function reset(){
     resetCharts();
 }
 
-function loadPage() {
-    remoteAction.getTreeResult(getUserConfig(),$j.proxy(function(t) {
-    var itemsResponse = t.responseObject();
-    $j(".test-history-table").html(
-        analyzerTemplate(itemsResponse)
-    );
-    var worstTests = getWorstTests(itemsResponse);
-    $j(".worst-tests-table").html(
-        analyzerWorstTestsTemplate(worstTests)
-    );
-    const start = new Date().getTime();
-    addEvents();
-    generateCharts();
-    $j("#table-loading").hide();
-    searchTests();
+function updateCache() {
+    remoteAction.updateAndGetBuilds(getUserConfig(), $j.proxy(function(t) {
+        var itemsResponse = t.responseObject();
+        loadDataFromCache(itemsResponse);
     },this));
 }
 
-function loadData(itemsResponse) {
-    sessionStorage.setItem('Test', itemsResponse);
+function loadDataFromCache(itemsResponse) {
     $j(".test-history-table").html(
         analyzerTemplate(itemsResponse)
     );
@@ -90,21 +78,23 @@ function loadData(itemsResponse) {
     searchTests();
 }
 
-function populateTemplate(){
+
+function populateTemplate() {
     reset();
     displayValues = $j("#show-build-durations").is(":checked");
     $j("#table-loading").show();
-    remoteAction.JScacheIsEmpty($j.proxy(function(isEmpty)  {
-         if (isEmpty.responseText == 'true') {
-         loadPage();
+    remoteAction.getCacheString(getUserConfig(), $j.proxy(function (cache) {
+        var loadedCache = cache.responseObject();
+        if (loadedCache === "") {
+            console.log("Cache is empty...");
+            console.log("Updating cache...");
+            updateCache();
         } else {
-            remoteAction.getCacheString($j.proxy(function(stringCache) {
-                var itemsResponse = JSON.parse(stringCache.responseObject());
-                   loadData(itemsResponse);
-            }))
+            var itemsResponse = JSON.parse(loadedCache);
+            loadDataFromCache(itemsResponse);
         }
     }))
-    }
+}
 
 function getUserConfig(){
     var userConfig = {};

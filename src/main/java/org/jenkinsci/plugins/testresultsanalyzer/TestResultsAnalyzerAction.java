@@ -16,8 +16,6 @@ import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
-import org.acegisecurity.userdetails.User;
-import org.json.simple.parser.JSONParser;
 import org.jenkinsci.plugins.testresultsanalyzer.config.UserConfig;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.ResultInfo;
 import org.jenkinsci.plugins.testresultsanalyzer.result.data.ResultData;
@@ -37,8 +35,11 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	ResultInfo resultInfo;
 	private int overrideNoOfFetch = 0;
 
+	private Cache cache;
+
 	public TestResultsAnalyzerAction(@SuppressWarnings("rawtypes") Job project) {
 		this.project = project;
+		cache = new Cache(project);
 	}
 
 	/**
@@ -187,8 +188,8 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	public void getJsonLoadData() {
 		LOG.info("Get data for report [isUpdated = "+String.valueOf(isUpdated())+"]");
 		try {
-			if (!cacheIsEmpty()) {
-			if (!isUpdated() || !isAddedNewBuildAfterRun()) {
+			if (!cache.isEmpty()) {
+			if (!isUpdated() || !cache.isNeedsUpdate()) {
 				return;
 			}
 			}
@@ -248,28 +249,6 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		}
 	}
 
-	private File createCacheFile() throws IOException {
-		File file = new File(String.format("work/jobs/%s/cache.json", project.getName()));
-		if (!file.exists()) {
-			boolean isCreated = file.createNewFile();
-			if (isCreated) {
-				LOG.info("Cache file was created successfully");
-			} else {
-				LOG.info("Cache file has already been created");
-			}
-		}
-		return file;
-	}
-
-	private void saveBuildsInCache(JSONObject builds) throws IOException {
-		FileWriter fileWriter = new FileWriter(createCacheFile());
-		try(BufferedWriter bufferedWriter = new BufferedWriter(fileWriter)) {
-			bufferedWriter.write(String.valueOf(builds));
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-	}
-
 	private JSONObject generateJsonBuilds(UserConfig userConfig) {
 		if (resultInfo == null) {
 			return new JSONObject();
@@ -283,52 +262,40 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		return jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
 	}
 
-	private JSONObject updateCache(UserConfig userConfig) throws IOException {
+	private void UpdateCache(UserConfig userConfig) throws IOException {
 		JSONObject builds = generateJsonBuilds(userConfig);
-		saveBuildsInCache(builds);
-		return builds;
-	}
-
-	private JSONObject updateCacheAndGetBuilds(UserConfig userConfig) throws IOException {
-		JSONObject builds = updateCache(userConfig);
-		return builds;
-	}
-
-	private boolean isAddedNewBuildAfterRun() throws IOException,  org.json.simple.parser.ParseException {
-		FileReader fileReader = new FileReader(createCacheFile());
-		JSONParser jsonParser = new JSONParser();
-		org.json.simple.JSONObject jsonObject = (org.json.simple.JSONObject) jsonParser.parse(fileReader);
-		long id = (long)jsonObject.get("lastBuild");
-		return project.getLastBuild().getNumber() != id;
-	}
-
-	private boolean cacheIsEmpty() {
-		File file = new File(String.format("work/jobs/%s/cache.json", project.getName()));
-		return file.length() == 0;
+		cache.save(builds);
 	}
 
 	@JavaScriptMethod
-	public boolean JScacheIsEmpty() {
-		return cacheIsEmpty();
+	public String getCacheString(UserConfig userConfig) throws IOException, ParseException {
+		if (cache.isEmpty()) {
+			LOG.info("Cache is empty, updating cache...");
+			UpdateCache(userConfig);
+			return "";
+		}
+		if (cache.isNeedsUpdate()) {
+			LOG.info("Build(s) has been created, updating cache...");
+			UpdateCache(userConfig);
+			return cache.getData();
+		}
+		LOG.info("Loading cache...");
+		return cache.getData();
 	}
 
 	@JavaScriptMethod
-	public String getCacheString() throws IOException {
-		return new String(Files.readAllBytes(Paths.get(String.format("work/jobs/%s/cache.json", project.getName()))));
-	}
-
-    @JavaScriptMethod
-    public JSONObject getTreeResult(UserConfig userConfig) throws IOException, ParseException {
-		if (cacheIsEmpty() || isAddedNewBuildAfterRun()) {
-			createCacheFile();
-			return updateCacheAndGetBuilds(userConfig);
+    public JSONObject updateAndGetBuilds(UserConfig userConfig) throws IOException, ParseException {
+		if (cache.isEmpty() || cache.isNeedsUpdate()) {
+			return generateJsonBuilds(userConfig);
 		} else {
-			String content = new String(Files.readAllBytes(Paths.get(String.format("work/jobs/%s/cache.json", project.getName()))));
-			return JSONObject.fromObject(content);
+			return JSONObject.fromObject(cache.getData());
 		}
     }
 
-
+    @JavaScriptMethod
+	public void clearCache() {
+		cache.delete();
+	}
 
 	@JavaScriptMethod
     public String getExportCSV(String timeBased, String noOfBuildsNeeded, UserConfig userConfig) {
