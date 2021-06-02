@@ -57,28 +57,54 @@ function reset(){
     resetCharts();
 }
 
-function populateTemplate(){
-    reset();
-    displayValues  = $j("#show-build-durations").is(":checked");
-    $j("#table-loading").show();
+function loadPage() {
     remoteAction.getTreeResult(getUserConfig(),$j.proxy(function(t) {
-        const start = new Date().getTime();
-        var itemsResponse = t.responseObject();
-        const end = new Date().getTime();
-        console.log(end - start);
-        $j(".test-history-table").html(
-            analyzerTemplate(itemsResponse)
-        );
-        var worstTests = getWorstTests(itemsResponse);
-        $j(".worst-tests-table").html(
-            analyzerWorstTestsTemplate(worstTests)
-        );
-        addEvents();
-        generateCharts();
-        $j("#table-loading").hide();
-        searchTests();
+    var itemsResponse = t.responseObject();
+    $j(".test-history-table").html(
+        analyzerTemplate(itemsResponse)
+    );
+    var worstTests = getWorstTests(itemsResponse);
+    $j(".worst-tests-table").html(
+        analyzerWorstTestsTemplate(worstTests)
+    );
+    const start = new Date().getTime();
+    addEvents();
+    generateCharts();
+    $j("#table-loading").hide();
+    searchTests();
     },this));
 }
+
+function loadData(itemsResponse) {
+    sessionStorage.setItem('Test', itemsResponse);
+    $j(".test-history-table").html(
+        analyzerTemplate(itemsResponse)
+    );
+    var worstTests = getWorstTests(itemsResponse);
+    $j(".worst-tests-table").html(
+        analyzerWorstTestsTemplate(worstTests)
+    );
+    addEvents();
+    generateCharts();
+    $j("#table-loading").hide();
+    searchTests();
+}
+
+function populateTemplate(){
+    reset();
+    displayValues = $j("#show-build-durations").is(":checked");
+    $j("#table-loading").show();
+    remoteAction.JScacheIsEmpty($j.proxy(function(isEmpty)  {
+         if (isEmpty.responseText == 'true') {
+         loadPage();
+        } else {
+            remoteAction.getCacheString($j.proxy(function(stringCache) {
+                var itemsResponse = JSON.parse(stringCache.responseObject());
+                   loadData(itemsResponse);
+            }))
+        }
+    }))
+    }
 
 function getUserConfig(){
     var userConfig = {};

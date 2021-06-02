@@ -187,7 +187,7 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	public void getJsonLoadData() {
 		LOG.info("Get data for report [isUpdated = "+String.valueOf(isUpdated())+"]");
 		try {
-			if (!CacheIsEmpty()) {
+			if (!cacheIsEmpty()) {
 			if (!isUpdated() || !isAddedNewBuildAfterRun()) {
 				return;
 			}
@@ -270,20 +270,6 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		}
 	}
 
-	private JSONObject UpdateCache(UserConfig userConfig) throws IOException {
-		JSONObject builds = generateJsonBuilds(userConfig);
-		saveBuildsInCache(builds);
-		return builds;
-	}
-
-	private boolean isAddedNewBuildAfterRun() throws IOException,  org.json.simple.parser.ParseException {
-		FileReader fileReader = new FileReader(createCacheFile());
-		JSONParser jsonParser = new JSONParser();
-		org.json.simple.JSONObject jsonObject = (org.json.simple.JSONObject) jsonParser.parse(fileReader);
-		long id = (long)jsonObject.get("lastBuild");
-		return project.getLastBuild().getNumber() != id;
-	}
-
 	private JSONObject generateJsonBuilds(UserConfig userConfig) {
 		if (resultInfo == null) {
 			return new JSONObject();
@@ -297,34 +283,51 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		return jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
 	}
 
-	private boolean CacheIsEmpty() {
+	private JSONObject updateCache(UserConfig userConfig) throws IOException {
+		JSONObject builds = generateJsonBuilds(userConfig);
+		saveBuildsInCache(builds);
+		return builds;
+	}
+
+	private JSONObject updateCacheAndGetBuilds(UserConfig userConfig) throws IOException {
+		JSONObject builds = updateCache(userConfig);
+		return builds;
+	}
+
+	private boolean isAddedNewBuildAfterRun() throws IOException,  org.json.simple.parser.ParseException {
+		FileReader fileReader = new FileReader(createCacheFile());
+		JSONParser jsonParser = new JSONParser();
+		org.json.simple.JSONObject jsonObject = (org.json.simple.JSONObject) jsonParser.parse(fileReader);
+		long id = (long)jsonObject.get("lastBuild");
+		return project.getLastBuild().getNumber() != id;
+	}
+
+	private boolean cacheIsEmpty() {
 		File file = new File(String.format("work/jobs/%s/cache.json", project.getName()));
 		return file.length() == 0;
 	}
 
+	@JavaScriptMethod
+	public boolean JScacheIsEmpty() {
+		return cacheIsEmpty();
+	}
+
+	@JavaScriptMethod
+	public String getCacheString() throws IOException {
+		return new String(Files.readAllBytes(Paths.get(String.format("work/jobs/%s/cache.json", project.getName()))));
+	}
+
     @JavaScriptMethod
     public JSONObject getTreeResult(UserConfig userConfig) throws IOException, ParseException {
-		long startTime = System.currentTimeMillis();
-		if (CacheIsEmpty()) {
-			JSONObject builds = UpdateCache(userConfig);
-			long endTime = System.currentTimeMillis();
-			LOG.info("Total execution time: " + (endTime-startTime) + "ms");
-			return builds;
-		}
-		if (isAddedNewBuildAfterRun()) {
-			LOG.info("New build was created and cache was updated");
-			JSONObject builds = UpdateCache(userConfig);
-			long endTime = System.currentTimeMillis();
-			LOG.info("Total execution time: " + (endTime-startTime) + "ms");
-			return builds;
+		if (cacheIsEmpty() || isAddedNewBuildAfterRun()) {
+			createCacheFile();
+			return updateCacheAndGetBuilds(userConfig);
 		} else {
-			LOG.info("Loading builds from cache...");
 			String content = new String(Files.readAllBytes(Paths.get(String.format("work/jobs/%s/cache.json", project.getName()))));
-			long endTime = System.currentTimeMillis();
-			LOG.info("Total execution time: " + (endTime-startTime) + "ms");
 			return JSONObject.fromObject(content);
 		}
     }
+
 
 
 	@JavaScriptMethod
