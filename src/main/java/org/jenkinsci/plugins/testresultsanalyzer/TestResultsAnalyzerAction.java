@@ -6,27 +6,23 @@ import hudson.tasks.test.TabulatedResult;
 import hudson.tasks.test.AbstractTestResultAction;
 import hudson.tasks.test.TestResult;
 import hudson.util.RunList;
-
 import java.io.*;
 import java.math.RoundingMode;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.text.DecimalFormat;
 import java.util.*;
 import java.util.logging.Logger;
-
-import jdk.jfr.events.FileWriteEvent;
 import jenkins.model.Jenkins;
-import jenkins.model.RunAction2;
-import jnr.x86asm.ERROR_CODE;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
-
-import org.codehaus.groovy.tools.shell.IO;
 import org.jenkinsci.plugins.testresultsanalyzer.config.UserConfig;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.ResultInfo;
 import org.jenkinsci.plugins.testresultsanalyzer.result.data.ResultData;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.ClassInfo;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.PackageInfo;
 import org.jenkinsci.plugins.testresultsanalyzer.result.info.TestCaseInfo;
+import org.json.simple.parser.ParseException;
 import org.kohsuke.stapler.bind.JavaScriptMethod;
 
 public class TestResultsAnalyzerAction extends Actionable implements Action {
@@ -39,8 +35,11 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	ResultInfo resultInfo;
 	private int overrideNoOfFetch = 0;
 
+	private Cache cache;
+
 	public TestResultsAnalyzerAction(@SuppressWarnings("rawtypes") Job project) {
 		this.project = project;
+		cache = new Cache(project);
 	}
 
 	/**
@@ -92,6 +91,8 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	public Job getProject() {
 		return this.project;
 	}
+
+
 
 	@JavaScriptMethod
 	public JSONArray getNoOfBuilds(String noOfbuildsNeeded, UserConfig userConfig) {
@@ -162,6 +163,7 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	}
 
 	private int getNoOfBuildRequired(String noOfbuildsNeeded) {
+
 		int noOfBuilds;
 		try {
 			noOfBuilds = Integer.parseInt(noOfbuildsNeeded);
@@ -185,8 +187,14 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	public void getJsonLoadData() {
 		LOG.info("Get data for report [isUpdated = "+String.valueOf(isUpdated())+"]");
-		if (!isUpdated()) {
-			return;
+		try {
+			if (!cache.isEmpty()) {
+			if (!isUpdated() || !cache.isNeedsUpdate()) {
+				return;
+			}
+			}
+		} catch (IOException | ParseException e) {
+			e.printStackTrace();
 		}
 		resultInfo = new ResultInfo();
 		builds = new ArrayList<Integer>();
@@ -241,30 +249,7 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		}
 	}
 
-	private File createCacheFile() throws IOException {
-		File file = new File(String.format("work/jobs/%s/cache.json", project.getName()));
-		if (!file.exists()) {
-			boolean isCreated = file.createNewFile();
-			if (isCreated) {
-				LOG.info("Cache file was created successfully");
-			} else {
-				LOG.info("Cache file has already been created");
-			}
-		}
-		return file;
-	}
-
-	private void saveBuildsInCache(JSONObject builds) throws IOException {
-		FileWriter fileWriter = new FileWriter(createCacheFile());
-		try(BufferedWriter bufferedWriter = new BufferedWriter(fileWriter)) {
-			bufferedWriter.write(String.valueOf(builds));
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-	}
-
-    @JavaScriptMethod
-    public JSONObject getTreeResult(UserConfig userConfig) throws IOException {
+	private JSONObject generateJsonBuilds(UserConfig userConfig) {
 		if (resultInfo == null) {
 			return new JSONObject();
 		}
@@ -272,13 +257,45 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		LOG.warning("No of build needed: " + userConfig.getNoOfBuildsNeeded());
 		LOG.warning("No of build fetched: " + String.valueOf(noOfBuilds));
 		LOG.warning("Build filter: " + userConfig.getBuildFilter());
-        List<Integer> buildList = getBuildList(noOfBuilds, userConfig.getBuildFilter());
-        JsTreeUtil jsTreeUtils = new JsTreeUtil();
-        JSONObject builds = jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
-		saveBuildsInCache(builds);
-		return builds;
+		List<Integer> buildList = getBuildList(noOfBuilds, userConfig.getBuildFilter());
+		JsTreeUtil jsTreeUtils = new JsTreeUtil();
+		return jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
+	}
+
+	private void UpdateCache(UserConfig userConfig) throws IOException {
+		JSONObject builds = generateJsonBuilds(userConfig);
+		cache.save(builds);
+	}
+
+	@JavaScriptMethod
+	public String getCacheString(UserConfig userConfig) throws IOException, ParseException {
+		if (cache.isEmpty()) {
+			LOG.info("Cache is empty, updating cache...");
+			UpdateCache(userConfig);
+			return "";
+		}
+		if (cache.isNeedsUpdate()) {
+			LOG.info("Build(s) has been created, updating cache...");
+			UpdateCache(userConfig);
+			return cache.getData();
+		}
+		LOG.info("Loading cache...");
+		return cache.getData();
+	}
+
+	@JavaScriptMethod
+    public JSONObject updateAndGetBuilds(UserConfig userConfig) throws IOException, ParseException {
+		if (cache.isEmpty() || cache.isNeedsUpdate()) {
+			return generateJsonBuilds(userConfig);
+		} else {
+			return JSONObject.fromObject(cache.getData());
+		}
     }
 
+    @JavaScriptMethod
+	public void clearCache() {
+		cache.delete();
+	}
 
 	@JavaScriptMethod
     public String getExportCSV(String timeBased, String noOfBuildsNeeded, UserConfig userConfig) {
