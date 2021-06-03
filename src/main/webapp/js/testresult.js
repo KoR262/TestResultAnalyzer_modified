@@ -85,14 +85,9 @@ function populateTemplate() {
     $j("#table-loading").show();
     remoteAction.getCacheString(getUserConfig(), $j.proxy(function (cache) {
         var loadedCache = cache.responseObject();
-        if (loadedCache === "") {
-            console.log("Cache is empty...");
-            console.log("Updating cache...");
-            updateCache();
-        } else {
-            var itemsResponse = JSON.parse(loadedCache);
-            loadDataFromCache(itemsResponse);
-        }
+        var itemsResponse = JSON.parse(loadedCache);
+        console.log('Loading from cache...');
+        loadDataFromCache(itemsResponse);
     }))
 }
 

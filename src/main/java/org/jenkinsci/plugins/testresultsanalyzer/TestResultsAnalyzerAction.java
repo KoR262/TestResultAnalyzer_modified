@@ -262,22 +262,16 @@ public class TestResultsAnalyzerAction extends Actionable implements Action {
 		return jsTreeUtils.getJsTree(buildList, resultInfo, userConfig.isHideConfigMethods());
 	}
 
-	private void UpdateCache(UserConfig userConfig) throws IOException {
+	private void saveCache(UserConfig userConfig) throws IOException {
 		JSONObject builds = generateJsonBuilds(userConfig);
 		cache.save(builds);
 	}
 
 	@JavaScriptMethod
 	public String getCacheString(UserConfig userConfig) throws IOException, ParseException {
-		if (cache.isEmpty()) {
-			LOG.info("Cache is empty, updating cache...");
-			UpdateCache(userConfig);
-			return "";
-		}
-		if (cache.isNeedsUpdate()) {
-			LOG.info("Build(s) has been created, updating cache...");
-			UpdateCache(userConfig);
-			return cache.getData();
+		if (cache.isEmpty() || cache.isNeedsUpdate()) {
+			LOG.info("Updating cache...");
+			saveCache(userConfig);
 		}
 		LOG.info("Loading cache...");
 		return cache.getData();
