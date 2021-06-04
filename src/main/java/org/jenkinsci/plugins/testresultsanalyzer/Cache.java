@@ -31,7 +31,6 @@ public class Cache {
         }
     }
 
-    // try create file
     private void tryCreateFile()  {
         try {
             createFile();
